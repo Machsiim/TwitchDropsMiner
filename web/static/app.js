@@ -9,7 +9,8 @@ const state = {
     settings: {},
     currentDrop: null,
     countdownTimer: null,  // Track the active countdown timer
-    translations: {}  // Store current translations
+    translations: {},  // Store current translations
+    paused: false  // Track pause state
 };
 
 // ==================== Version Checking ====================
@@ -290,6 +291,39 @@ socket.on('language_changed', (data) => {
 socket.on('wanted_items_update', (data) => {
     renderWantedItems(data);
 });
+
+socket.on('mining_paused', (data) => {
+    state.paused = data.paused;
+    updatePauseButton();
+});
+
+// ==================== Pause/Resume ====================
+
+function updatePauseButton() {
+    const btn = document.getElementById('pause-btn');
+    if (!btn) return;
+    if (state.paused) {
+        btn.textContent = '▶ RESUME';
+        btn.title = 'Resume mining';
+        btn.classList.add('paused');
+    } else {
+        btn.textContent = '⏸ PAUSE';
+        btn.title = 'Pause mining';
+        btn.classList.remove('paused');
+    }
+}
+
+async function togglePause() {
+    const endpoint = state.paused ? '/api/resume' : '/api/pause';
+    try {
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) throw new Error('Request failed');
+        state.paused = !state.paused;
+        updatePauseButton();
+    } catch (err) {
+        console.error('Failed to toggle pause:', err);
+    }
+}
 
 // ==================== UI Update Functions ====================
 

@@ -304,6 +304,33 @@ async def confirm_oauth():
     return {"success": True}
 
 
+@app.post("/api/pause")
+async def pause_mining():
+    """Pause mining by switching to IDLE state"""
+    if not twitch_client:
+        raise HTTPException(status_code=503, detail="Twitch client not initialized")
+
+    from src.config import State
+
+    twitch_client.stop_watching()
+    twitch_client.change_state(State.IDLE)
+    await sio.emit("mining_paused", {"paused": True})
+    return {"success": True}
+
+
+@app.post("/api/resume")
+async def resume_mining():
+    """Resume mining by triggering inventory fetch"""
+    if not twitch_client:
+        raise HTTPException(status_code=503, detail="Twitch client not initialized")
+
+    from src.config import State
+
+    twitch_client.change_state(State.INVENTORY_FETCH)
+    await sio.emit("mining_paused", {"paused": False})
+    return {"success": True}
+
+
 @app.post("/api/reload")
 async def trigger_reload():
     """Trigger application reload"""
