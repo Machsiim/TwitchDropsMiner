@@ -253,6 +253,40 @@ class MessageHandlerService:
             drop.update_minutes(message["data"]["current_progress_min"])
 
     @task_wrapper
+    async def process_community_points(self, user_id: int, message: JsonType) -> None:
+        """
+        Process websocket community points updates (bonus claim available).
+
+        Automatically claims the channel points bonus chest when it becomes available.
+
+        Args:
+            user_id: The user ID that sent the message
+            message: The websocket message payload
+        """
+        msg_type: str = message.get("type", "")
+        if msg_type != "claim-available":
+            return
+
+        try:
+            claim_data = message["data"]["claim"]
+            claim_id: str = claim_data["id"]
+            channel_id: str = claim_data["channel_id"]
+        except (KeyError, TypeError):
+            logger.warning("Malformed community points claim message: %s", message)
+            return
+
+        try:
+            await self._twitch.gql_request(
+                GQL_OPERATIONS["ClaimCommunityPoints"].with_variables(
+                    {"input": {"claimID": claim_id, "channelID": channel_id}}
+                )
+            )
+            logger.info("Claimed channel points bonus for channel %s", channel_id)
+            self._twitch.print(f"Claimed channel points bonus (channel: {channel_id})")
+        except Exception:
+            logger.exception("Failed to claim channel points bonus")
+
+    @task_wrapper
     async def process_notifications(self, user_id: int, message: JsonType) -> None:
         """
         Process websocket notification updates.

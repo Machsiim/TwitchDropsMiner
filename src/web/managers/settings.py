@@ -101,6 +101,9 @@ class SettingsManager:
         should_trigger_update |= self.check_and_update_setting(
             "mining_benefits", settings_data.get("mining_benefits"), True
         )
+        self.check_and_update_setting(
+            "fallback_channel", settings_data.get("fallback_channel")
+        )
 
         self._settings.save()
         asyncio.create_task(self._broadcaster.emit("settings_updated", self.get_settings()))

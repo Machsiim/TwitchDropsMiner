@@ -13,6 +13,7 @@ import aiohttp
 from src.api import GQLClient, HTTPClient
 from src.auth import _AuthState
 from src.config import (
+    GQL_OPERATIONS,
     MAX_CHANNELS,
     ClientType,
     State,
@@ -24,7 +25,7 @@ from src.exceptions import (
 )
 from src.i18n import _
 from src.models.campaign import DropsCampaign
-from src.models.channel import Channel
+from src.models.channel import Channel, Stream
 from src.services.channel_service import ChannelService
 from src.services.inventory_service import InventoryService
 from src.services.maintenance import MaintenanceService
@@ -214,6 +215,12 @@ class Twitch:
                     auth_state.user_id,
                     self._message_handler_service.process_notifications,
                 ),
+                WebsocketTopic(
+                    "User",
+                    "CommunityPoints",
+                    auth_state.user_id,
+                    self._message_handler_service.process_community_points,
+                ),
             ]
         )
         full_cleanup: bool = False
@@ -221,8 +228,12 @@ class Twitch:
         self.change_state(State.INVENTORY_FETCH)
         while True:
             if self._state is State.IDLE:
-                self.gui.status.update(_.t["gui"]["status"]["idle"])
-                self.stop_watching()
+                fallback = self.settings.fallback_channel.strip()
+                if fallback:
+                    await self._start_fallback_watch(fallback)
+                else:
+                    self.gui.status.update(_.t["gui"]["status"]["idle"])
+                    self.stop_watching()
                 # clear the flag and wait until it's set again
                 self._state_change.clear()
             elif self._state is State.INVENTORY_FETCH:
@@ -522,6 +533,42 @@ class Twitch:
     def restart_watching(self) -> None:
         """Delegate to WatchService."""
         self._watch_service.restart_watching()
+
+    async def _start_fallback_watch(self, login: str) -> None:
+        """
+        Start watching a fallback channel for channel points when no drops are available.
+
+        Args:
+            login: The Twitch channel login name to watch
+        """
+        self.stop_watching()
+        try:
+            response: JsonType = await self.gql_request(
+                GQL_OPERATIONS["GetStreamInfo"].with_variables({"channel": login})
+            )
+            channel_data: JsonType | None = response["data"]["user"]
+            if channel_data is None:
+                self.print(f"Fallback channel '{login}' not found")
+                self.gui.status.update(_.t["gui"]["status"]["idle"])
+                return
+            if not channel_data["stream"]:
+                self.print(f"Fallback channel '{login}' is offline")
+                self.gui.status.update(_.t["gui"]["status"]["idle"])
+                return
+            channel = Channel(
+                self,
+                id=channel_data["id"],
+                login=login,
+                display_name=channel_data["displayName"],
+            )
+            channel._stream = Stream.from_get_stream(channel, channel_data)
+            self._watch_service.watch(channel, update_status=False)
+            status_text = f"Watching {channel.name} (Channel Points)"
+            self.print(status_text)
+            self.gui.status.update(status_text)
+        except Exception:
+            logger.exception("Failed to start fallback watch for '%s'", login)
+            self.gui.status.update(_.t["gui"]["status"]["idle"])
 
     def is_manual_mode(self) -> bool:
         """Check if manual mode is currently active."""

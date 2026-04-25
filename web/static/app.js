@@ -1078,6 +1078,10 @@ function updateSettingsUI(settings) {
     document.getElementById('connection-quality').value = settings.connection_quality || 1;
     document.getElementById('minimum-refresh-interval').value = settings.minimum_refresh_interval_minutes || 30;
 
+    // Update fallback channel
+    const fallbackInput = document.getElementById('fallback-channel');
+    if (fallbackInput) fallbackInput.value = settings.fallback_channel || '';
+
     // Update proxy settings and indicator
     const proxyUrl = settings.proxy || '';
     const proxyInput = document.getElementById('proxy-url');
@@ -1510,6 +1514,7 @@ async function saveSettings() {
         connection_quality: parseInt(document.getElementById('connection-quality').value),
         minimum_refresh_interval_minutes: parseInt(document.getElementById('minimum-refresh-interval').value),
         proxy: state.settings.proxy || '',
+        fallback_channel: document.getElementById('fallback-channel')?.value?.trim() || '',
         games_to_watch: state.settings.games_to_watch || [],
         inventory_filters: getInventoryFilters(),
         mining_benefits: {
