@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 import string
 from collections import OrderedDict, abc
+from datetime import datetime, timezone
 from typing import TypeVar
 
 
@@ -14,6 +15,11 @@ CHARS_HEX_LOWER = string.digits + "abcdef"
 CHARS_HEX_UPPER = string.digits + "ABCDEF"
 
 _T = TypeVar("_T")
+
+
+def isonow() -> str:
+    """Return current UTC time in ISO 8601 format with milliseconds."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def create_nonce(chars: str, length: int) -> str:

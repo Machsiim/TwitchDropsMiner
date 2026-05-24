@@ -18,7 +18,7 @@ from src.utils import ExponentialBackoff, RateLimiter
 if TYPE_CHECKING:
     from src.api.http_client import HTTPClient
     from src.auth import _AuthState
-    from src.config import ClientInfo, GQLOperation, JsonType
+    from src.config import ClientInfo, GQLOperation, GQLOperationType, JsonType
 
 
 logger = logging.getLogger("TwitchDrops")
@@ -63,12 +63,12 @@ class GQLClient:
         self._qgl_limiter = RateLimiter(capacity=5, window=1)
 
     @overload
-    async def request(self, ops: GQLOperation) -> JsonType: ...
+    async def request(self, ops: GQLOperationType) -> JsonType: ...
 
     @overload
-    async def request(self, ops: list[GQLOperation]) -> list[JsonType]: ...
+    async def request(self, ops: list[GQLOperationType]) -> list[JsonType]: ...
 
-    async def request(self, ops: GQLOperation | list[GQLOperation]) -> JsonType | list[JsonType]:
+    async def request(self, ops: GQLOperationType | list[GQLOperationType]) -> JsonType | list[JsonType]:
         """
         Execute one or more GraphQL operations.
 

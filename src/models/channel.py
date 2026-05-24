@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import logging
 import re
@@ -11,11 +12,12 @@ from typing import TYPE_CHECKING, Any, SupportsInt, cast
 import aiohttp
 from yarl import URL
 
-from src.config.constants import CALL, ONLINE_DELAY, GQLOperation, JsonType, URLType
+from src.config.constants import CALL, ONLINE_DELAY, GQLOperation, GQLQuery, JsonType, URLType
 from src.config.operations import GQL_OPERATIONS
 from src.exceptions import MinerException, RequestException
 from src.models.game import Game
 from src.utils.json_utils import json_minify
+from src.utils.string_utils import isonow
 
 
 if TYPE_CHECKING:
@@ -45,7 +47,7 @@ class Stream:
         self._stream_url: URLType | None = None
 
     @cached_property
-    def _spade_payload(self) -> JsonType:
+    def _gql_payload(self) -> GQLQuery:
         payload = [
             {
                 "event": "minute-watched",
@@ -53,17 +55,26 @@ class Stream:
                     "broadcast_id": str(self.broadcast_id),
                     "channel_id": str(self.channel.id),
                     "channel": self.channel._login,
+                    "client_time": isonow(),
+                    "game": self.game.name if self.game is not None else "",
+                    "game_id": str(self.game.id) if self.game is not None else "",
                     "hidden": False,
+                    "is_live": True,
                     "live": True,
-                    "location": "channel",
                     "logged_in": True,
+                    "minutes_logged": 1,
                     "muted": False,
-                    "player": "site",
                     "user_id": self.channel._twitch._auth_state.user_id,
                 },
             }
         ]
-        return {"data": (b64encode(json_minify(payload).encode("utf8"))).decode("utf8")}
+        return GQLQuery(
+            (
+                "\n mutation SendEvents($input: SendSpadeEventsInput!) "
+                "{\n sendSpadeEvents(input: $input) {\n statusCode\n}\n}\n"
+            ),
+            b64encode(gzip.compress(json_minify(payload).encode("utf8"))).decode("utf8"),
+        )
 
     @classmethod
     def from_get_stream(cls, channel: Channel, channel_data: JsonType) -> Stream:
@@ -146,7 +157,6 @@ class Channel:
         "id",
         "_login",
         "_display_name",
-        "_spade_url",
         "_stream",
         "_pending_stream_up",
         "acl_based",
@@ -166,7 +176,6 @@ class Channel:
         self.id: int = int(id)
         self._login: str = login
         self._display_name: str | None = display_name
-        self._spade_url: URLType | None = None
         self._stream: Stream | None = None
         self._pending_stream_up: asyncio.Task[Any] | None = None
         # ACL-based channels are:
@@ -288,30 +297,6 @@ class Channel:
             self._pending_stream_up.cancel()
             self._pending_stream_up = None
         self._gui_channels.remove(self)
-
-    async def get_spade_url(self) -> URLType:
-        """
-        To get this monstrous thing, you have to walk a chain of requests.
-        Streamer page (HTML) --parse-> Streamer Settings (JavaScript) --parse-> Spade URL
-
-        For mobile view, spade_url is available immediately from the page, skipping step #2.
-        """
-        SETTINGS_PATTERN: str = r'src="(https://[\w.]+/config/settings\.[0-9a-f]{32}\.js)"'
-        SPADE_PATTERN: str = r'"beacon_?url": ?"(https://[^"]+)"'
-        async with self._twitch.request("GET", self.url) as response1:
-            streamer_html: str = await response1.text(encoding="utf8")
-        match = re.search(SPADE_PATTERN, streamer_html, re.I)
-        if not match:
-            match = re.search(SETTINGS_PATTERN, streamer_html, re.I)
-            if not match:
-                raise MinerException("Error while spade_url extraction: step #1")
-            streamer_settings = match.group(1)
-            async with self._twitch.request("GET", streamer_settings) as response2:
-                settings_js: str = await response2.text(encoding="utf8")
-            match = re.search(SPADE_PATTERN, settings_js, re.I)
-            if not match:
-                raise MinerException("Error while spade_url extraction: step #2")
-        return URLType(match.group(1))
 
     def _check_drops_enabled(self, available_drops: list[JsonType]) -> bool:
         return any(
@@ -474,12 +459,8 @@ class Channel:
     async def send_watch(self) -> bool:
         if self._stream is None:
             return False
-        if self._spade_url is None:
-            self._spade_url = await self.get_spade_url()
         try:
-            async with self._twitch.request(
-                "POST", self._spade_url, data=self._stream._spade_payload
-            ) as response:
-                return response.status == 204
+            watch_response = await self._twitch.gql_request(self._stream._gql_payload)
+            return watch_response["data"]["sendSpadeEvents"]["statusCode"] == 204
         except RequestException:
             return False

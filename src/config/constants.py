@@ -70,6 +70,25 @@ class State(Enum):
     EXIT = auto()
 
 
+GQLOperationType: TypeAlias = "GQLQuery | GQLOperation"
+
+
+class GQLQuery(JsonType):
+    """GraphQL query with inline query string (used for SendEvents mutation)."""
+
+    def __init__(self, query: str, g64data: str):
+        super().__init__(
+            query=query,
+            variables={
+                "input": {
+                    "data": g64data,
+                    "repository": "twilight",
+                    "encoding": "GZIP_B64",
+                }
+            },
+        )
+
+
 class GQLOperation(JsonType):
     """GraphQL operation with persisted query hash."""
 
