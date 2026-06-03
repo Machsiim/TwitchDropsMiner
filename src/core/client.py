@@ -230,7 +230,16 @@ class Twitch:
             if self._state is State.IDLE:
                 fallback = self.settings.fallback_channel.strip()
                 if fallback:
-                    await self._start_fallback_watch(fallback)
+                    watching = await self._start_fallback_watch(fallback)
+                    if not watching:
+                        # Channel is offline — re-check every 5 minutes
+                        self._state_change.clear()
+                        try:
+                            await asyncio.wait_for(self._state_change.wait(), timeout=300)
+                        except asyncio.TimeoutError:
+                            # Timeout expired, loop back to re-check fallback
+                            self._state_change.set()
+                        continue
                 else:
                     self.gui.status.update(_.t["gui"]["status"]["idle"])
                     self.stop_watching()
@@ -534,12 +543,15 @@ class Twitch:
         """Delegate to WatchService."""
         self._watch_service.restart_watching()
 
-    async def _start_fallback_watch(self, login: str) -> None:
+    async def _start_fallback_watch(self, login: str) -> bool:
         """
         Start watching a fallback channel for channel points when no drops are available.
 
         Args:
             login: The Twitch channel login name to watch
+
+        Returns:
+            True if the channel is now being watched, False if offline or failed.
         """
         self.stop_watching()
         try:
@@ -550,11 +562,11 @@ class Twitch:
             if channel_data is None:
                 self.print(f"Fallback channel '{login}' not found")
                 self.gui.status.update(_.t["gui"]["status"]["idle"])
-                return
+                return False
             if not channel_data["stream"]:
                 self.print(f"Fallback channel '{login}' is offline")
                 self.gui.status.update(_.t["gui"]["status"]["idle"])
-                return
+                return False
             channel = Channel(
                 self,
                 id=channel_data["id"],
@@ -566,9 +578,11 @@ class Twitch:
             status_text = f"Watching {channel.name} (Channel Points)"
             self.print(status_text)
             self.gui.status.update(status_text)
+            return True
         except Exception:
             logger.exception("Failed to start fallback watch for '%s'", login)
             self.gui.status.update(_.t["gui"]["status"]["idle"])
+            return False
 
     def is_manual_mode(self) -> bool:
         """Check if manual mode is currently active."""
