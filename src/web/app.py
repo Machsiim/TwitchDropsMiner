@@ -313,7 +313,9 @@ async def pause_mining():
 
     from src.config import State
 
+    twitch_client._paused = True
     twitch_client.stop_watching()
+    twitch_client._stop_fallback_watch()
     twitch_client.change_state(State.IDLE)
     await sio.emit("mining_paused", {"paused": True})
     return {"success": True}
@@ -327,6 +329,7 @@ async def resume_mining():
 
     from src.config import State
 
+    twitch_client._paused = False
     twitch_client.change_state(State.INVENTORY_FETCH)
     await sio.emit("mining_paused", {"paused": False})
     return {"success": True}

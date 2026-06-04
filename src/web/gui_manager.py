@@ -60,7 +60,8 @@ class WebGUIManager:
         # Callback to trigger game update when relevant settings change
         on_settings_change = self._twitch.get_change_state_callable(State.GAMES_UPDATE)
         self.settings = SettingsManager(
-            self._broadcaster, twitch.settings, self.output, on_change=on_settings_change
+            self._broadcaster, twitch.settings, self.output, on_change=on_settings_change,
+            twitch=twitch,
         )
 
         # Selected channel tracking (set by web client)
