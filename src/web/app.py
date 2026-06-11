@@ -76,7 +76,6 @@ class SettingsUpdate(BaseModel):
     minimum_refresh_interval_minutes: int | None = None
     inventory_filters: dict | None = None
     mining_benefits: dict[str, bool] | None = None
-    fallback_channel: str | None = None
 
 
 class ProxyVerifyRequest(BaseModel):
@@ -313,9 +312,7 @@ async def pause_mining():
 
     from src.config import State
 
-    twitch_client._paused = True
     twitch_client.stop_watching()
-    twitch_client._stop_fallback_watch()
     twitch_client.change_state(State.IDLE)
     await sio.emit("mining_paused", {"paused": True})
     return {"success": True}
@@ -329,7 +326,6 @@ async def resume_mining():
 
     from src.config import State
 
-    twitch_client._paused = False
     twitch_client.change_state(State.INVENTORY_FETCH)
     await sio.emit("mining_paused", {"paused": False})
     return {"success": True}

@@ -14,17 +14,6 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
             "channel": ...,  # channel login
         },
     ),
-    # can be used to claim channel points
-    "ClaimCommunityPoints": GQLOperation(
-        "ClaimCommunityPoints",
-        "46aaeebe02c99afdf4fc97c7c0cba964124bf6b0af229395f1f6d1feed05b3d0",
-        variables={
-            "input": {
-                "claimID": ...,  # points claim_id
-                "channelID": ...,  # channel ID as a str
-            },
-        },
-    ),
     # can be used to claim a drop
     "ClaimDrop": GQLOperation(
         "DropsPage_ClaimDropRewards",

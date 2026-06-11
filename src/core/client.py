@@ -13,7 +13,6 @@ import aiohttp
 from src.api import GQLClient, HTTPClient
 from src.auth import _AuthState
 from src.config import (
-    GQL_OPERATIONS,
     MAX_CHANNELS,
     ClientType,
     State,
@@ -25,7 +24,7 @@ from src.exceptions import (
 )
 from src.i18n import _
 from src.models.campaign import DropsCampaign
-from src.models.channel import Channel, Stream
+from src.models.channel import Channel
 from src.services.channel_service import ChannelService
 from src.services.inventory_service import InventoryService
 from src.services.maintenance import MaintenanceService
@@ -78,9 +77,6 @@ class Twitch:
         # Manual mode tracking
         self._manual_target_channel: Channel | None = None
         self._manual_target_game: Game | None = None
-        # Fallback channel tracking
-        self._fallback_channel: Channel | None = None
-        self._paused: bool = False
         # Websocket
         self.websocket = WebsocketPool(self)
         # Maintenance task
@@ -122,7 +118,6 @@ class Twitch:
 
     async def shutdown(self) -> None:
         start_time = time()
-        self._stop_fallback_watch()
         self.stop_watching()
         if self._watching_task is not None:
             self._watching_task.cancel()
@@ -219,12 +214,6 @@ class Twitch:
                     auth_state.user_id,
                     self._message_handler_service.process_notifications,
                 ),
-                WebsocketTopic(
-                    "User",
-                    "CommunityPoints",
-                    auth_state.user_id,
-                    self._message_handler_service.process_community_points,
-                ),
             ]
         )
         full_cleanup: bool = False
@@ -232,28 +221,12 @@ class Twitch:
         self.change_state(State.INVENTORY_FETCH)
         while True:
             if self._state is State.IDLE:
-                if self._paused:
-                    self._stop_fallback_watch()
-                    self.gui.status.update(_.t["gui"]["status"]["idle"])
-                    self.stop_watching()
-                    self._state_change.clear()
-                elif (fallback := self.settings.fallback_channel.strip()):
-                    watching = await self._start_fallback_watch(fallback)
-                    if not watching:
-                        self._state_change.clear()
-                        try:
-                            await asyncio.wait_for(self._state_change.wait(), timeout=300)
-                        except asyncio.TimeoutError:
-                            self._state_change.set()
-                        continue
-                    self._state_change.clear()
-                else:
-                    self._stop_fallback_watch()
-                    self.gui.status.update(_.t["gui"]["status"]["idle"])
-                    self.stop_watching()
-                    self._state_change.clear()
+                self.gui.status.update(_.t["gui"]["status"]["idle"])
+                self.stop_watching()
+                # clear the flag and wait until it's set again
+                self._state_change.clear()
             elif self._state is State.INVENTORY_FETCH:
-                self._stop_fallback_watch()
+                # ensure the websocket is running
                 await self.websocket.start()
                 await self.fetch_inventory()
                 self.gui.set_games({campaign.game for campaign in self.inventory})
@@ -549,77 +522,6 @@ class Twitch:
     def restart_watching(self) -> None:
         """Delegate to WatchService."""
         self._watch_service.restart_watching()
-
-    async def _start_fallback_watch(self, login: str) -> bool:
-        """
-        Start watching a fallback channel for channel points when no drops are available.
-
-        Returns True if the channel is now being watched, False if offline or failed.
-        """
-        if (
-            self._fallback_channel is not None
-            and self._fallback_channel._login == login
-            and self._fallback_channel.online
-        ):
-            return True
-
-        self._stop_fallback_watch()
-        self.stop_watching()
-        try:
-            response: JsonType = await self.gql_request(
-                GQL_OPERATIONS["GetStreamInfo"].with_variables({"channel": login})
-            )
-            channel_data: JsonType | None = response["data"]["user"]
-            if channel_data is None:
-                self.print(f"Fallback channel '{login}' not found")
-                self.gui.status.update(_.t["gui"]["status"]["idle"])
-                return False
-            if not channel_data["stream"]:
-                self.print(f"Fallback channel '{login}' is offline")
-                self.gui.status.update(_.t["gui"]["status"]["idle"])
-                return False
-            channel = Channel(
-                self,
-                id=channel_data["id"],
-                login=login,
-                display_name=channel_data["displayName"],
-            )
-            channel._stream = Stream.from_get_stream(channel, channel_data)
-            self._fallback_channel = channel
-            self.websocket.add_topics(
-                [
-                    WebsocketTopic(
-                        "Channel",
-                        "StreamState",
-                        channel.id,
-                        self._on_fallback_stream_state,
-                    ),
-                ]
-            )
-            self._watch_service.watch(channel, update_status=False)
-            status_text = f"Watching {channel.name} (Channel Points)"
-            self.print(status_text)
-            self.gui.status.update(status_text)
-            return True
-        except Exception:
-            logger.exception("Failed to start fallback watch for '%s'", login)
-            self.gui.status.update(_.t["gui"]["status"]["idle"])
-            return False
-
-    def _stop_fallback_watch(self) -> None:
-        if self._fallback_channel is not None:
-            self.websocket.remove_topics(
-                [WebsocketTopic.as_str("Channel", "StreamState", self._fallback_channel.id)]
-            )
-            self._fallback_channel = None
-
-    async def _on_fallback_stream_state(self, channel_id: int, message: JsonType) -> None:
-        if message["type"] == "stream-down" and self._fallback_channel is not None:
-            logger.info("Fallback channel went offline, re-checking")
-            self._fallback_channel._stream = None
-            self._stop_fallback_watch()
-            self.stop_watching()
-            self.change_state(State.IDLE)
 
     def is_manual_mode(self) -> bool:
         """Check if manual mode is currently active."""

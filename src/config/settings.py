@@ -47,7 +47,6 @@ default_settings = {
         "UNKNOWN": True,
     },
     "proxy": "",
-    "fallback_channel": "",
 }
 
 
@@ -61,7 +60,6 @@ class Settings:
     minimum_refresh_interval_minutes: int
     mining_benefits: dict[str, bool]
     proxy: str
-    fallback_channel: str
 
     def __init__(self):
         self.load()

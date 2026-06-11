@@ -16,7 +16,6 @@ logger = logging.getLogger("TwitchDrops")
 
 if TYPE_CHECKING:
     from src.config.settings import Settings
-    from src.core.client import Twitch
     from src.web.managers.broadcaster import WebSocketBroadcaster
     from src.web.managers.console import ConsoleOutputManager
 
@@ -34,13 +33,11 @@ class SettingsManager:
         settings: Settings,
         console: ConsoleOutputManager,
         on_change: Callable[[], None] | None = None,
-        twitch: Twitch | None = None,
     ):
         self._broadcaster = broadcaster
         self._settings = settings
         self._console = console
         self._on_change = on_change
-        self._twitch = twitch
         self._available_games: list[str] = []
 
     def get_settings(self) -> dict[str, Any]:
@@ -104,13 +101,6 @@ class SettingsManager:
         should_trigger_update |= self.check_and_update_setting(
             "mining_benefits", settings_data.get("mining_benefits"), True
         )
-        self.check_and_update_setting(
-            "fallback_channel",
-            settings_data.get("fallback_channel"),
-            False,
-            lambda _: self._on_fallback_changed(),
-        )
-
         self._settings.save()
         asyncio.create_task(self._broadcaster.emit("settings_updated", self.get_settings()))
 
@@ -130,13 +120,6 @@ class SettingsManager:
         self._log_change(f"Setting changed: {key} = {new_value}")
         action(new_value)
         return should_trigger_update
-
-    def _on_fallback_changed(self) -> None:
-        from src.config import State
-
-        if self._twitch is not None and self._twitch._state is State.IDLE:
-            self._twitch._stop_fallback_watch()
-            self._twitch.change_state(State.IDLE)
 
     def _set_language(self, language: str):
         _.set_language(language)

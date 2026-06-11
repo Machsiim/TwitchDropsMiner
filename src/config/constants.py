@@ -162,7 +162,7 @@ WEBSOCKET_TOPICS: dict[str, dict[str, str]] = {
         "Presence": "presence",  # unused
         "Drops": "user-drop-events",
         "Notifications": "onsite-notifications",
-        "CommunityPoints": "community-points-user-v1",
+        "CommunityPoints": "community-points-user-v1",  # unused
     },
     "Channel": {  # Using channel_id
         "Drops": "channel-drop-events",  # unused
