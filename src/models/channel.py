@@ -47,8 +47,8 @@ class Stream:
         self._stream_url: URLType | None = None
 
     @cached_property
-    def _gql_payload(self) -> GQLQuery:
-        payload = [
+    def _watch_payload(self) -> list[JsonType]:
+        return [
             {
                 "event": "minute-watched",
                 "properties": {
@@ -68,12 +68,21 @@ class Stream:
                 },
             }
         ]
+
+    @cached_property
+    def spade_payload(self) -> JsonType:
+        return {"data": b64encode(json_minify(self._watch_payload).encode("utf8")).decode("utf8")}
+
+    @cached_property
+    def _gql_payload(self) -> GQLQuery:
         return GQLQuery(
             (
                 "\n mutation SendEvents($input: SendSpadeEventsInput!) "
                 "{\n sendSpadeEvents(input: $input) {\n statusCode\n}\n}\n"
             ),
-            b64encode(gzip.compress(json_minify(payload).encode("utf8"))).decode("utf8"),
+            b64encode(gzip.compress(json_minify(self._watch_payload).encode("utf8"))).decode(
+                "utf8"
+            ),
         )
 
     @classmethod
@@ -158,6 +167,7 @@ class Channel:
         "_login",
         "_display_name",
         "_stream",
+        "_spade_url",
         "_pending_stream_up",
         "acl_based",
     )
@@ -177,6 +187,7 @@ class Channel:
         self._login: str = login
         self._display_name: str | None = display_name
         self._stream: Stream | None = None
+        self._spade_url: URLType | None = None
         self._pending_stream_up: asyncio.Task[Any] | None = None
         # ACL-based channels are:
         # • considered first when switching channels
@@ -456,7 +467,52 @@ class Channel:
         async with self._twitch.request("HEAD", stream_chunk_url) as head_response:
             return head_response.status == 200
 
+    async def get_spade_url(self) -> URLType:
+        """
+        To get this monstrous thing, you have to walk a chain of requests.
+        Streamer page (HTML) --parse-> Streamer Settings (JavaScript) --parse-> Spade URL
+
+        For mobile view, spade_url is available immediately from the page, skipping step #2.
+        """
+        SETTINGS_PATTERN: str = r'src="(https://[\w.]+/config/settings\.[0-9a-f]{32}\.js)"'
+        SPADE_PATTERN: str = r'"spade_?url": ?"(https://[.\w\-/]+)"'
+        async with self._twitch.request("GET", self.url) as response1:
+            streamer_html: str = await response1.text(encoding="utf8")
+        match = re.search(SPADE_PATTERN, streamer_html, re.I)
+        if not match:
+            match = re.search(SETTINGS_PATTERN, streamer_html, re.I)
+            if not match:
+                raise MinerException("Error while spade_url extraction: step #1")
+            streamer_settings = match.group(1)
+            async with self._twitch.request("GET", streamer_settings) as response2:
+                settings_js: str = await response2.text(encoding="utf8")
+            match = re.search(SPADE_PATTERN, settings_js, re.I)
+            if not match:
+                raise MinerException("Error while spade_url extraction: step #2")
+        return URLType(match.group(1))
+
     async def send_watch(self) -> bool:
+        """
+        Send a minute-watched event to Twitch's Spade tracking endpoint.
+
+        NOTE: The GQL `sendSpadeEvents` route (see `_send_watch_gql`) no longer advances
+        drops - Twitch accepts the mutation but stops counting the minutes. Watch events
+        have to be POSTed to the Spade URL directly.
+        """
+        if self._stream is None:
+            return False
+        if self._spade_url is None:
+            self._spade_url = await self.get_spade_url()
+        try:
+            async with self._twitch.request(
+                "POST", self._spade_url, data=self._stream.spade_payload
+            ) as response:
+                return response.status == 204
+        except RequestException:
+            return False
+
+    # NOTE: This is currently unused - kept for the case Twitch reinstates the GQL route.
+    async def _send_watch_gql(self) -> bool:
         if self._stream is None:
             return False
         try:
